@@ -274,9 +274,9 @@ class ECGApp(QtWidgets.QMainWindow):
                     self.hr_label.setText(f"Heart Rate: {avg_hr} BPM")
                     
                     if avg_hr < 60:
-                        self.hr_label.setStyleSheet("font-size: 24px; color: blue;")  # Tachycardia
+                        self.hr_label.setStyleSheet("font-size: 24px; color: blue;")  # Bradycardia
                     elif avg_hr > 100:
-                        self.hr_label.setStyleSheet("font-size: 24px; color: red;")   # Bradycardia
+                        self.hr_label.setStyleSheet("font-size: 24px; color: red;")   # Tachycardia
                     else:
                         self.hr_label.setStyleSheet("font-size: 24px; color: green;") # Normal
                     
