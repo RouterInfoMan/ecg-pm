@@ -2,3 +2,4 @@ pyserial
 pyqt5
 pyqtgraph
 numpy
+scipy

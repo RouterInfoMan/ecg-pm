@@ -6,6 +6,7 @@ from PyQt5 import QtWidgets, QtCore
 import pyqtgraph as pg
 import time
 from collections import deque
+from scipy import signal
 
 # Constants
 SAMPLE_RATE = 250  # Hz
@@ -25,6 +26,42 @@ def find_pico_port():
             return port.device
     
     return ports[0].device if ports else None
+
+def pan_tompkins_detect(data, sample_rate=250):
+    if len(data) < sample_rate:  # Need at least 1 second of data
+        return []
+    
+    # Bandpass filter (5-15 Hz)
+    nyquist = sample_rate / 2
+    low = 5 / nyquist
+    high = 15 / nyquist
+    b, a = signal.butter(4, [low, high], btype='band')
+    filtered = signal.filtfilt(b, a, data)
+    
+    # Derivative for QRS detection
+    derivative = np.diff(filtered)
+    squared = derivative ** 2
+    
+    # moving average integration
+    window_size = int(0.15 * sample_rate)
+    integrated = np.convolve(squared, np.ones(window_size)/window_size, mode='same')
+    
+    # find peaks
+    peaks = []
+    threshold = np.mean(integrated) + 0.5 * np.std(integrated)
+    min_distance = int(0.2 * sample_rate)
+    
+    for i in range(min_distance, len(integrated) - min_distance):
+        if (integrated[i] > threshold and 
+            integrated[i] > integrated[i-1] and 
+            integrated[i] > integrated[i+1]):
+            
+            start = max(0, i - min_distance//2)
+            end = min(len(integrated), i + min_distance//2)
+            if integrated[i] == max(integrated[start:end]):
+                peaks.append(i)
+    
+    return peaks
 
 class ECGApp(QtWidgets.QMainWindow):
     def __init__(self):
@@ -218,30 +255,15 @@ class ECGApp(QtWidgets.QMainWindow):
             self.log_debug(f"Error: {str(e)}")
     
     def update_heart_rate(self, data):
-        """Calculate heart rate from ECG data"""
+        """Calculate heart rate using Pan-Tompkins algorithm"""
         try:
-            # Filter to remove baseline
-            filtered_data = data - np.convolve(data, np.ones(FILTER_SIZE)/FILTER_SIZE, mode='same')
-            
-            # Find peaks (R waves)
-            signal_mean = np.mean(filtered_data)
-            signal_std = np.std(filtered_data)
-            threshold = signal_mean + 1.5 * signal_std
-            
-            peaks = []
-            for i in range(5, len(filtered_data)-5):
-                if (filtered_data[i] > threshold and 
-                    filtered_data[i] > filtered_data[i-1] and 
-                    filtered_data[i] > filtered_data[i+1]):
-                    # Check if highest in vicinity
-                    window_start = max(0, i-15)
-                    window_end = min(len(filtered_data), i+15)
-                    if filtered_data[i] == max(filtered_data[window_start:window_end]):
-                        peaks.append(i)
+            peaks = pan_tompkins_detect(data, SAMPLE_RATE)
             
             if len(peaks) >= 2:
+                # Calculate RR intervals
                 intervals = [peaks[i+1] - peaks[i] for i in range(len(peaks)-1)]
                 
+                # Convert to time and calculate heart rate
                 avg_interval_sec = np.mean(intervals) / SAMPLE_RATE
                 heart_rate = int(60 / avg_interval_sec)
                 
@@ -252,9 +274,9 @@ class ECGApp(QtWidgets.QMainWindow):
                     self.hr_label.setText(f"Heart Rate: {avg_hr} BPM")
                     
                     if avg_hr < 60:
-                        self.hr_label.setStyleSheet("font-size: 24px; color: blue;")  # Low
+                        self.hr_label.setStyleSheet("font-size: 24px; color: blue;")  # Tachycardia
                     elif avg_hr > 100:
-                        self.hr_label.setStyleSheet("font-size: 24px; color: red;")   # High
+                        self.hr_label.setStyleSheet("font-size: 24px; color: red;")   # Bradycardia
                     else:
                         self.hr_label.setStyleSheet("font-size: 24px; color: green;") # Normal
                     
